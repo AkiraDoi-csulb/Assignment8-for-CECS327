@@ -1,1 +1,3 @@
-
+1. We prepared the files "testConnect.py" and "zhihantest.py," these files are used by Akira and Zhihan to verify whether they can access the database via code.
+   For Akira  DB, "testConnect.py" 
+   For Zhihan DB, "zhihantest.py"
