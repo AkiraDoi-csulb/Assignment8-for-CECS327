@@ -67,16 +67,17 @@ def client():
 
         if message not in queries:
             print("Sorry, this query cannot be processed. Please try one of the supported queries.")
+            continue
 
         # Look and send the queries
         query_text = queries[message]
         print(f"\nSending query to server...")
 
         # 2.send message to the server
-        TCPSocket.send(message.encode("utf-8"))
+        TCPSocket.send(query_text.encode("utf-8"))
 
         # Set the maximum message size to recieve 
-        data = TCPSocket.recv(1024)
+        data = TCPSocket.recv(4096)
         # print final results
         print( '-'*100 )
         # Display server reply
