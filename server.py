@@ -44,6 +44,12 @@ LITERS_TO_GALLONS = 0.264172
 TOPIC_A = "akira.doi01@student.csulb.edu"
 TOPIC_B = "zhihanyao121@gmail.com"
 
+# Makes table name safe for SQL string formatting
+def safe_table_name(table_name):
+    if not table_name.replace("_"," ").isalnum():
+        raise ValueError(f"Invaild table name: {table_name}")
+    return f'"{table_name}"'
+
 # DATABASE CONNECTION AND TIME HELPERS
 # Return a psycopg2 connection for House A or House B
 # connect_timeout=10 prevents indefinite hanging on slow connections
@@ -56,6 +62,23 @@ def to_pst_str(utc_dt):
     if utc_dt.tzinfo is None:
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     return utc_dt.astimezone(PST).strftime("%Y-%m-%d %H:%M:%S PST")
+
+# convert payload into python dict
+# Neon usually returns JSON payload as dict already
+def parse_payload(payload):
+    if isinstance(payload,dict):
+        return payload
+    if isinstance(payload,str):
+        return json.loads(payload)
+    return {}
+
+def get_house_from_payload(payload):
+    topic = payload.get("topic", "")
+    if TOPIC_A in topic:
+        return "HOUSE A"
+    if TOPIC_B in topic:
+        return "HOUSE B"
+    return None
 
 # Read the data from the PAYLOAD
 #
