@@ -7,3 +7,30 @@
    For Zhihan DB, "zhihanDB.py"
 
 3. requirements: psycopg2_binary, python-dotenv
+
+4. How to Run client.py and server.py: 
+- For the assignment, we need to connect PostgreSQL databases(NeonDB), Run the command "pip install psycopg2-binary" to get psycopg2_binary
+- On a device with Python installed, run server.py and client.py.　
+  On the server.py, use comand: "python server.py" -> Set the port number
+  On the client.py, use comand: "python client.py" -> Enter IP of the server, then set the port number. 
+　※ Our code accept 1024 or higher ports (Since lower-numbered ports are often reserved for specific purposes)
+- After connect successfully, the client displays a numbered menu. User need to type 1, 2, or 3 to select a query,
+  or type the full question text.
+
+5. To connect Databeses, The server uses psycopg2 to connect to two separate NeonDB. And Use the prepared “akiraDB.py” and “zhihanDB.py” files to check the payload, 
+   then locate and use the required data. 
+
+6. Distributed Query Processing
+The server processes queries by combining data from multiple sources of the two NeonDB databases
+- Retrieve House A's data from "table_virtual" in Akira's local DB.
+- Retrieve the post sharing data from "table_ass8_virtual" in Akira's local DB.
+- Check the data if it is not enough for the query. If so, connect directly to Zhihan's NeonDB and retrieve the missing presharing data from `Table1_virtual`
+- Merge all datas into a single linked list
+- Calculate the average or sum from the merged linked list
+- Return the responce to the client side
+
+7. Determine Query Completeness
+   We set “SHARING_START” to the exact UTC date and time when DataNiz sharing was enabled on the server. 
+   This is used as the reference point for determining whether a query fully meets the conditions.
+
+8. Use DataNiz metadata - this is contains the data like payload and topic. By using this, We identified the sensor and the house.
