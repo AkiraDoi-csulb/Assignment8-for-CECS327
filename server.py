@@ -196,6 +196,10 @@ class LinkedList:
             cur = cur.next
         return result
 
+    def merge(self,other_list):
+        for value, house in other_list.get_all():
+            self.append(value,house)
+            
     # Return total values and counts per house (used for electricity)
     def sum_by_house(self):
         totals = {"House A": 0.0, "House B": 0.0}
@@ -509,7 +513,7 @@ def server():
         # Route query to handler and send result back
         response = route_query(message)
         print(f"[Server] Sending response...")
-        incomingSocket.send(response.encode("utf-8"))
+        incomingSocket.sendall(response.encode("utf-8"))
 
     # Close both sockets when done
     incomingSocket.close()
