@@ -7,16 +7,26 @@
 # psycopg2 : PostgreSQL driver to connect to NeonDB
 # datetime : for time range calculations and PST conversion
 import socket
+import os
+import json
 import psycopg2
+from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
 # CONFIG: Connect with Databases and some setting
 # House A = Akira's NeonDB
-HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# # House B = Zhihan's NeonDB
+# HOUSE_B_CONN = "postgresql://neondb_owner:npg_WcEeoxSyXQ74@ep-dawn-rice-a4oyqq79-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
-# House B = Zhihan's NeonDB
-HOUSE_B_CONN = "postgresql://neondb_owner:npg_WcEeoxSyXQ74@ep-dawn-rice-a4oyqq79-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# When DataNiz sharing was enabled (UTC)
+HOUSE_A_CONN = os.getenv("House_A_CONN")
+HOUSE_B_CONN = os.getenv("House_B_CONN")
 
+HOUSE_A_PRE_TABLE = os.getenv("HOUSE_A_PRE_TABLE", "table_virtual")
+HOUSE_B_MAIN_TABLE = os.getenv("HOUSE_B_MAIN_TABLE", "Assignment8_virtual")
+
+SERVER_PORT = int(os.getenv("SERVER_PORT", "5050"))
 # When DataNiz sharing was enabled (UTC)
 # First shared row appears at 2026-04-24 22:50:03 UTC
 SHARING_START = datetime(2026, 4, 24, 22, 50, 0, tzinfo=timezone.utc)
