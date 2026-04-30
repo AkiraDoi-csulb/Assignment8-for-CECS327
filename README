@@ -33,4 +33,4 @@ The server processes queries by combining data from multiple sources of the two 
    We set “SHARING_START” to the exact UTC date and time when DataNiz sharing was enabled on the server. 
    This is used as the reference point for determining whether a query fully meets the conditions.
 
-8. Use DataNiz metadata - this is contains the data like payload and topic. By using this, We identified the sensor and the house.
+8. Use DataNiz metadata - this is contains the data like payload and topic. By using this, We identified the data like sensor and the house datas.
