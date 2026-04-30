@@ -27,9 +27,12 @@ HOUSE_A_PRE_TABLE = os.getenv("HOUSE_A_PRE_TABLE", "table_virtual")
 HOUSE_B_MAIN_TABLE = os.getenv("HOUSE_B_MAIN_TABLE", "Assignment8_virtual")
 
 SERVER_PORT = int(os.getenv("SERVER_PORT", "5050"))
+
 # When DataNiz sharing was enabled (UTC)
 # First shared row appears at 2026-04-24 22:50:03 UTC
-SHARING_START = datetime(2026, 4, 24, 22, 50, 0, tzinfo=timezone.utc)
+SHARING_START_TEXT = os.getenv("SHARING_START_TIME", "2025-04-24 22:50:03")
+SHARING_START = datetime.striptime(SHARING_START_TEXT,"%Y-%m-%d %H:%M:%S")
+SHARING_START = SHARING_START.replace(tzinfo=timezone.utc)
 
 # PST = UTC - 7 hours (daylight saving time in April)
 PST = timezone(timedelta(hours=-7))
