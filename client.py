@@ -28,7 +28,7 @@ def client():
     # 1.Prompt the user to input:
     # - Server IP address
     # - Server port number
-    serverIP   = input("Enter the IP address of the server: ")
+    serverIP   = input("Enter the IP address of the server: ").strip()
     # Display an error message if the IP address is entered incorrectly. 
     try:
         ipaddress.ip_address(serverIP)
@@ -36,7 +36,8 @@ def client():
         print("Error: the IP address is entered incorrectly")
         return
     # User sets the port number
-    serverPort = input("Enter the port number of the server: ")
+    serverPort = input("Enter the port number of the server: ").strip()
+
     if not serverPort.isdigit() or not (1024 <= int(serverPort) <= 65535):
         print("Error: the port number is entered incorrectly")
         return
@@ -45,6 +46,7 @@ def client():
 
     # Create TCP socket
     TCPSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
     try:
         # Connect TCP socket
         TCPSocket.connect((serverIP, serverPort))
@@ -59,10 +61,12 @@ def client():
         userMenu()
 
         # Prompt user, send message to the server
-        message = input("User choice from the menu(quit by sending 'exit'): ")
+        message = input("User choice from the menu(quit by sending 'exit'): ").strip()
         
         # Prepare escape message 'exit' to stop the program 
-        if message == "exit":
+        if message.lower() == "exit":
+            TCPSocket.sendall("exit".encode("utf-8"))
+            print("Client disconnected")
             break
 
         # Accept menu number (1/2/3) OR the full question text
