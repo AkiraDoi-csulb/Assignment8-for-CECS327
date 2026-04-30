@@ -7,32 +7,18 @@
 # psycopg2 : PostgreSQL driver to connect to NeonDB
 # datetime : for time range calculations and PST conversion
 import socket
-import os
-import json
 import psycopg2
-from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
 # CONFIG: Connect with Databases and some setting
 # House A = Akira's NeonDB
-# HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-# # House B = Zhihan's NeonDB
-# HOUSE_B_CONN = "postgresql://neondb_owner:npg_WcEeoxSyXQ74@ep-dawn-rice-a4oyqq79-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
-
-# When DataNiz sharing was enabled (UTC)
-HOUSE_A_CONN = os.getenv("House_A_CONN")
-HOUSE_B_CONN = os.getenv("House_B_CONN")
-
-HOUSE_A_PRE_TABLE = os.getenv("HOUSE_A_PRE_TABLE", "table_virtual")
-HOUSE_B_MAIN_TABLE = os.getenv("HOUSE_B_MAIN_TABLE", "Assignment8_virtual")
-
-SERVER_PORT = int(os.getenv("SERVER_PORT", "5050"))
+HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+# House B = Zhihan's NeonDB
+HOUSE_B_CONN = "postgresql://neondb_owner:npg_WcEeoxSyXQ74@ep-dawn-rice-a4oyqq79-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 # When DataNiz sharing was enabled (UTC)
 # First shared row appears at 2026-04-24 22:50:03 UTC
-SHARING_START_TEXT = os.getenv("SHARING_START_TIME", "2025-04-24 22:50:03")
-SHARING_START = datetime.striptime(SHARING_START_TEXT,"%Y-%m-%d %H:%M:%S")
-SHARING_START = SHARING_START.replace(tzinfo=timezone.utc)
+SHARING_START = datetime(2026, 4, 24, 22, 50, 0, tzinfo=timezone.utc)
 
 # PST = UTC - 7 hours (daylight saving time in April)
 PST = timezone(timedelta(hours=-7))
@@ -43,12 +29,6 @@ LITERS_TO_GALLONS = 0.264172
 # DataNiz topic identifiers for each house
 TOPIC_A = "akira.doi01@student.csulb.edu"
 TOPIC_B = "zhihanyao121@gmail.com"
-
-# Makes table name safe for SQL string formatting
-def safe_table_name(table_name):
-    if not table_name.replace("_"," ").isalnum():
-        raise ValueError(f"Invaild table name: {table_name}")
-    return f'"{table_name}"'
 
 # DATABASE CONNECTION AND TIME HELPERS
 # Return a psycopg2 connection for House A or House B
@@ -63,23 +43,6 @@ def to_pst_str(utc_dt):
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     return utc_dt.astimezone(PST).strftime("%Y-%m-%d %H:%M:%S PST")
 
-# convert payload into python dict
-# Neon usually returns JSON payload as dict already
-def parse_payload(payload):
-    if isinstance(payload,dict):
-        return payload
-    if isinstance(payload,str):
-        return json.loads(payload)
-    return {}
-
-def get_house_from_payload(payload):
-    topic = payload.get("topic", "")
-    if TOPIC_A in topic:
-        return "HOUSE A"
-    if TOPIC_B in topic:
-        return "HOUSE B"
-    return None
-
 # Read the data from the PAYLOAD
 #
 # All sensor data lives in the payload.
@@ -88,16 +51,16 @@ def get_house_from_payload(payload):
 #
 # TABLE is used for actual data:
 # House A (Akira):
-#   table_virtual        → Akira's pre-sharing data
-#   Assignment8_virtual  → post-sharing data for BOTH houses
+#   table_virtual        → Akira's presharing data
+#   table_ass8_virtual   → post sharing data for BOTH houses
 #                          filter by topic containing TOPIC_A
 #
 # House B (Zhihan):
-#   Table1_virtual       → Zhihan's pre-sharing data
-#   Assignment8_virtual  → post-sharing data for BOTH houses
+#   Table1_virtual       → Zhihan's presharing data
+#   Assignment8_virtual  → post sharing data for BOTH houses
 #                          filter by topic containing TOPIC_B
 #
-# SENSOR KEYS (from actual payload inspection):
+# Sensors Data (from actual payload inspection):
 #   Moisture  → 'Moisture Meter - Moisture Meter' or starts with same
 #   Dishwasher→ 'Float Switch - Float Switch'
 #   Electricity→ 'Ammeter' (main board) or 'Ammeter 3 UUID...'
@@ -106,58 +69,58 @@ def get_house_from_payload(payload):
 # Handles: 'Moisture Meter - Moisture Meter', 'Moisture', 'LM386 - Sensor1'
 # and their UUID-suffixed duplicate board variants
 def extract_moisture(payload):
-    for key, value in payload.items():
-        key_lower = key.lower()
-        
-        if "moisture meter" in key_lower or key_lower == "moisture" or "lm386" in key_lower:
+    # Primary Akira/Zhihan shared board key
+    if 'Moisture Meter - Moisture Meter' in payload:
+        val = float(payload['Moisture Meter - Moisture Meter'])
+        return val if val > 0 else None
+    # Zhihan's original fridge key (newer data)
+    if 'Moisture' in payload:
+        val = float(payload['Moisture'])
+        return val if val > 0 else None
+    # Zhihan's early fridge key
+    if 'LM386 - Sensor1' in payload:
+        val = float(payload['LM386 - Sensor1'])
+        return val if val > 0 else None
+    # Duplicate board keys with UUID suffix — check all keys
+    for key in payload:
+        if 'Moisture Meter' in key or (key.startswith('Moisture') and 'Ammeter' not in key):
             try:
-                val = float(value)
-                if val > 0:
-                    return val
-            except (ValueError,TypeError):
+                val = float(payload[key])
+                return val if val > 0 else None
+            except (ValueError, TypeError):
                 continue
-    
     return None
 
 # Extract dishwasher water usage from payload (liters per cycle)
 # Akira uses: 'Float Switch - Float Switch'
 # Zhihan uses: 'water consumption sensor' or 'Float Switch - Float Switch'
 def extract_water(payload):
-    for key, value in payload.items():
-        key_lower = key.lower()
-
-        if "float switch" in key_lower or "water consumption" in key_lower:
-            try:
-                val = float(value)
-                if val > 0:
-                    return val
-            except (ValueError,TypeError):
-                continue
-        
-        return None
+    if 'Float Switch - Float Switch' in payload:
+        val = float(payload['Float Switch - Float Switch'])
+        return val if val > 0 else None
+    if 'water consumption sensor' in payload:
+        val = float(payload['water consumption sensor'])
+        return val if val > 0 else None
+    return None
 
 # Extract electricity reading from payload
 # Main board: 'Ammeter'
 # Duplicate board: 'Ammeter 3 UUID...' or 'Ammeter 1 UUID...'
 def extract_electricity(payload):
-    total = 0.0
-    found = False
-
-    for key, value in payload.items():
-        key_lower = key.lower()
-
-        if key_lower.startswitch("ammeter"):
+    if 'Ammeter' in payload:
+        val = float(payload['Ammeter'])
+        return val if val > 0 else None
+    # Duplicate board ammeter keys with UUID suffix
+    for key in payload:
+        if key.startswith('Ammeter'):
             try:
-                val = float(value)
+                val = float(payload[key])
                 if val > 0:
-                    total += val
-                    found = True
-            except (ValueError,TypeError):
+                    return val
+            except (ValueError, TypeError):
                 continue
-    if found:
-        return total
-    
     return None
+
 
 # Use LINKED LIST
 # Required by assignment to manage retrieved sensor records
@@ -211,7 +174,7 @@ class LinkedList:
 
 # DATA FETCHERS
 # Data layout:
-#   - House A data: query table_virtual  + Assignment8_virtual (topic=akira) or table_ass8_virtual
+#   - House A data: query table_virtual  +  table_ass8_virtual
 #   - House B data: query Table1_virtual + Assignment8_virtual (topic=zhihan)
 
 # Determine house ownership from the topic field in payload
