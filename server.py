@@ -106,58 +106,58 @@ def get_house_from_payload(payload):
 # Handles: 'Moisture Meter - Moisture Meter', 'Moisture', 'LM386 - Sensor1'
 # and their UUID-suffixed duplicate board variants
 def extract_moisture(payload):
-    # Primary Akira/Zhihan shared board key
-    if 'Moisture Meter - Moisture Meter' in payload:
-        val = float(payload['Moisture Meter - Moisture Meter'])
-        return val if val > 0 else None
-    # Zhihan's original fridge key (newer data)
-    if 'Moisture' in payload:
-        val = float(payload['Moisture'])
-        return val if val > 0 else None
-    # Zhihan's early fridge key
-    if 'LM386 - Sensor1' in payload:
-        val = float(payload['LM386 - Sensor1'])
-        return val if val > 0 else None
-    # Duplicate board keys with UUID suffix — check all keys
-    for key in payload:
-        if 'Moisture Meter' in key or (key.startswith('Moisture') and 'Ammeter' not in key):
+    for key, value in payload.items():
+        key_lower = key.lower()
+        
+        if "moisture meter" in key_lower or key_lower == "moisture" or "lm386" in key_lower:
             try:
-                val = float(payload[key])
-                return val if val > 0 else None
-            except (ValueError, TypeError):
+                val = float(value)
+                if val > 0:
+                    return val
+            except (ValueError,TypeError):
                 continue
+    
     return None
 
 # Extract dishwasher water usage from payload (liters per cycle)
 # Akira uses: 'Float Switch - Float Switch'
 # Zhihan uses: 'water consumption sensor' or 'Float Switch - Float Switch'
 def extract_water(payload):
-    if 'Float Switch - Float Switch' in payload:
-        val = float(payload['Float Switch - Float Switch'])
-        return val if val > 0 else None
-    if 'water consumption sensor' in payload:
-        val = float(payload['water consumption sensor'])
-        return val if val > 0 else None
-    return None
+    for key, value in payload.items():
+        key_lower = key.lower()
+
+        if "float switch" in key_lower or "water consumption" in key_lower:
+            try:
+                val = float(value)
+                if val > 0:
+                    return val
+            except (ValueError,TypeError):
+                continue
+        
+        return None
 
 # Extract electricity reading from payload
 # Main board: 'Ammeter'
 # Duplicate board: 'Ammeter 3 UUID...' or 'Ammeter 1 UUID...'
 def extract_electricity(payload):
-    if 'Ammeter' in payload:
-        val = float(payload['Ammeter'])
-        return val if val > 0 else None
-    # Duplicate board ammeter keys with UUID suffix
-    for key in payload:
-        if key.startswith('Ammeter'):
-            try:
-                val = float(payload[key])
-                if val > 0:
-                    return val
-            except (ValueError, TypeError):
-                continue
-    return None
+    total = 0.0
+    found = False
 
+    for key, value in payload.items():
+        key_lower = key.lower()
+
+        if key_lower.startswitch("ammeter"):
+            try:
+                val = float(value)
+                if val > 0:
+                    total += val
+                    found = True
+            except (ValueError,TypeError):
+                continue
+    if found:
+        return total
+    
+    return None
 
 # Use LINKED LIST
 # Required by assignment to manage retrieved sensor records
