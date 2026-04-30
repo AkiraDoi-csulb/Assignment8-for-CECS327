@@ -65,12 +65,24 @@ def client():
         if message == "exit":
             break
 
-        if message not in queries:
+        # Accept menu number (1/2/3) OR the full question text
+        query_text = None
+ 
+        # Check if user typed a number
+        if message in queries:
+            query_text = queries[message]
+        else:
+            # Check if user typed the full question text
+            for key, val in queries.items():
+                if message.strip().lower() == val.strip().lower():
+                    query_text = val
+                    break
+ 
+        # Reject anything that does not match a number or full query text
+        if query_text is None:
             print("Sorry, this query cannot be processed. Please try one of the supported queries.")
             continue
 
-        # Look and send the queries
-        query_text = queries[message]
         print(f"\nSending query to server...")
 
         # 2.send message to the server
