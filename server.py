@@ -10,10 +10,7 @@ import socket
 import psycopg2
 from datetime import datetime, timezone, timedelta
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 1: CONFIG
-# ═══════════════════════════════════════════════════════════
-
+# CONFIG: Connect with Databases and some setting
 # House A = Akira's NeonDB
 HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
@@ -34,11 +31,7 @@ LITERS_TO_GALLONS = 0.264172
 TOPIC_A = "akira.doi01@student.csulb.edu"
 TOPIC_B = "zhihanyao121@gmail.com"
 
-
-# ═══════════════════════════════════════════════════════════
-# SECTION 2: DATABASE CONNECTION AND TIME HELPERS
-# ═══════════════════════════════════════════════════════════
-
+# DATABASE CONNECTION AND TIME HELPERS
 # Return a psycopg2 connection for House A or House B
 # connect_timeout=10 prevents indefinite hanging on slow connections
 def get_conn(house="A"):
@@ -51,16 +44,13 @@ def to_pst_str(utc_dt):
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
     return utc_dt.astimezone(PST).strftime("%Y-%m-%d %H:%M:%S PST")
 
-
-# ═══════════════════════════════════════════════════════════
-# SECTION 3: PAYLOAD EXTRACTION HELPERS
+# Read the data from the PAYLOAD
 #
-# All sensor data lives in the 'payload' JSON column.
+# All sensor data lives in the payload.
 # Each function checks for the correct key for that sensor.
 # Returns a float value or None if the row is not relevant.
 #
-# TABLE STRUCTURE (confirmed from actual data):
-#
+# TABLE is used for actual data:
 # House A (Akira):
 #   table_virtual        → Akira's pre-sharing data
 #   Assignment8_virtual  → post-sharing data for BOTH houses
@@ -75,7 +65,6 @@ def to_pst_str(utc_dt):
 #   Moisture  → 'Moisture Meter - Moisture Meter' or starts with same
 #   Dishwasher→ 'Float Switch - Float Switch'
 #   Electricity→ 'Ammeter' (main board) or 'Ammeter 3 UUID...'
-# ═══════════════════════════════════════════════════════════
 
 # Extract moisture value from any payload (works for both houses)
 # Handles: 'Moisture Meter - Moisture Meter', 'Moisture', 'LM386 - Sensor1'
@@ -115,7 +104,7 @@ def extract_water(payload):
         return val if val > 0 else None
     return None
 
-# Extract electricity reading from payload (Ammeter = kWh proxy)
+# Extract electricity reading from payload
 # Main board: 'Ammeter'
 # Duplicate board: 'Ammeter 3 UUID...' or 'Ammeter 1 UUID...'
 def extract_electricity(payload):
@@ -134,10 +123,8 @@ def extract_electricity(payload):
     return None
 
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 4: LINKED LIST DATA STRUCTURE
+# Use LINKED LIST
 # Required by assignment to manage retrieved sensor records
-# ═══════════════════════════════════════════════════════════
 
 # Single node — holds one sensor reading and its house label
 class Node:
@@ -186,21 +173,10 @@ class LinkedList:
         return totals, counts
 
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 5: DATA FETCHERS
-#
-# Data layout after sharing (confirmed from actual DB):
-#
-#   House A pre-sharing  → table_virtual       (topic=akira)
-#   House A post-sharing → Assignment8_virtual (topic=akira)
-#   House B pre-sharing  → Table1_virtual      (topic=zhihan, in House B DB)
-#   House B post-sharing → Assignment8_virtual (topic=zhihan, in House A DB)
-#
-# This means for queries that cover both pre and post sharing:
-#   - House A data: query table_virtual + Assignment8_virtual (topic=akira)
-#   - House B post: query Assignment8_virtual (topic=zhihan) from House A DB
-#   - House B pre : query Table1_virtual from House B DB directly
-# ═══════════════════════════════════════════════════════════
+# DATA FETCHERS
+# Data layout:
+#   - House A data: query table_virtual  + Assignment8_virtual (topic=akira) or table_ass8_virtual
+#   - House B data: query Table1_virtual + Assignment8_virtual (topic=zhihan)
 
 # Determine house ownership from the topic field in payload
 # This uses DataNiz metadata to identify which house owns each reading
@@ -303,7 +279,6 @@ def fetch_b_pre(start_dt, extractor):
 def fetch_distributed(start_dt, end_dt, extractor):
     # Fetch from Akira's table_virtual (house determined by topic)
     ll_main = fetch_table_virtual(start_dt, end_dt, extractor)
-
     # Fetch from Akira's table_ass8_virtual (post-sharing, house by topic)
     ll_ass8 = fetch_table_ass8(start_dt, end_dt, extractor)
 
@@ -324,15 +299,11 @@ def fetch_distributed(start_dt, end_dt, extractor):
         merged.append(val, house)
     for val, house in ll_b_pre.get_all():
         merged.append(val, house)
-
     print(f"[Server] Total records merged: {merged.size}")
     return merged
 
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 6: QUERY HANDLERS
-# ═══════════════════════════════════════════════════════════
-
+# QUERY HANDLERS:
 # Query 1: Average fridge moisture for past hour, week, month
 # Sensor: 'Moisture Meter - Moisture Meter' (both houses)
 # Output unit: % RH (no imperial conversion needed)
@@ -373,7 +344,6 @@ def query_fridge_moisture():
 
     lines.append(f"\n  Queried at: {to_pst_str(now)}")
     return "\n".join(lines)
-
 
 # Query 2: Average dishwasher water per cycle for past hour, week, month
 # Sensor: 'Float Switch - Float Switch' (liters)
@@ -449,12 +419,8 @@ def query_electricity():
     return "\n".join(lines)
 
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 7: QUERY ROUTER
-# ═══════════════════════════════════════════════════════════
-
-# Match incoming message to the correct handler
-# Uses keyword matching to avoid encoding/whitespace issues
+# QUERY ROUTER:
+# The process is guided by the query provided by the client side.
 def route_query(message):
     msg = message.strip().lower()
     print(f"[Server] Routing: '{msg[:60]}...'")
@@ -469,10 +435,7 @@ def route_query(message):
         return "ERROR: Unrecognized query."
 
 
-# ═══════════════════════════════════════════════════════════
-# SECTION 8: TCP SERVER
-# ═══════════════════════════════════════════════════════════
-
+# TCP server: Configure necessary server-side processing.
 def server():
     # Ask user which port to listen on
     port = int(input("Enter port number to listen: "))
