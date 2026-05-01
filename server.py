@@ -1,75 +1,49 @@
 # Assignment8: Build a Distributed End-to-End IoT System
-# Name: Akira Doi, Zhihan Yao
-# Date: 4/30/2026
-# File: server.py
-#
-#
-# This server connects to two NeonDB databases, reads IoT data from DataNiz tables,
-# answers three sensor queries, and sends the results back to the client by TCP.
+# Name       : Akira Doi, Zhihan Yao
+# Date       : 4/30/2026
+# server.py
 
+# socket   : built-in library for TCP network communication
+# psycopg2 : PostgreSQL driver to connect to NeonDB
+# datetime : for time range calculations and PST conversion
 import socket
-import os
 import psycopg2
-from dotenv import load_dotenv
 from datetime import datetime, timezone, timedelta
 
+# CONFIG: Connect with Databases and some setting
+# House A = Akira's NeonDB
+HOUSE_A_CONN = "postgresql://neondb_owner:npg_BcIL4nvy0CbD@ep-young-voice-anpwrm64-pooler.c-6.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
+# House B = Zhihan's NeonDB
+HOUSE_B_CONN = "postgresql://neondb_owner:npg_WcEeoxSyXQ74@ep-dawn-rice-a4oyqq79-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
-load_dotenv()
-
-# Database connection strings are stored in .env for safety.
-HOUSE_A_CONN = os.getenv("HOUSE_A_CONN")
-HOUSE_B_CONN = os.getenv("HOUSE_B_CONN")
-SERVER_PORT = int(os.getenv("SERVER_PORT", "5050"))
-
-if not HOUSE_A_CONN or not HOUSE_B_CONN:
-    raise ValueError("Missing HOUSE_A_CONN or HOUSE_B_CONN in .env file.")
-
-# DataNiz sharing start time in UTC.
-# First shared row appears around 2026-04-24 22:50:03 UTC.
+# When DataNiz sharing was enabled (UTC)
+# First shared row appears at 2026-04-24 22:50:03 UTC
 SHARING_START = datetime(2026, 4, 24, 22, 50, 0, tzinfo=timezone.utc)
 
-# In April, California uses PDT, which is UTC-7.
-PACIFIC = timezone(timedelta(hours=-7))
+# PST = UTC - 7 hours (daylight saving time in April)
+PST = timezone(timedelta(hours=-7))
 
-# Unit conversion.
+# Unit conversion: 1 liter = 0.264172 US gallons
 LITERS_TO_GALLONS = 0.264172
 
-# DataNiz topic identifiers.
+# DataNiz topic identifiers for each house
 TOPIC_A = "akira.doi01@student.csulb.edu"
 TOPIC_B = "zhihanyao121@gmail.com"
 
-
-# ============================================================
-# DATABASE AND TIME HELPER FUNCTIONS
-# ============================================================
-
-# Return a psycopg2 connection for House A or House B.
-
-def get_conn(house):
-    
-    if house == "A":
-        conn_str = HOUSE_A_CONN
-    else:
-        conn_str = HOUSE_B_CONN
-
+# DATABASE CONNECTION AND TIME HELPERS
+# Return a psycopg2 connection for House A or House B
+# connect_timeout=10 prevents indefinite hanging on slow connections
+def get_conn(house="A"):
+    conn_str = HOUSE_A_CONN if house == "A" else HOUSE_B_CONN
     return psycopg2.connect(conn_str, connect_timeout=10)
 
-# Convert UTC datetime to Pacific time string.
-
-def to_pacific_str(utc_dt):
-    
+# Convert a UTC datetime to a readable PST string for output
+def to_pst_str(utc_dt):
     if utc_dt.tzinfo is None:
         utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+    return utc_dt.astimezone(PST).strftime("%Y-%m-%d %H:%M:%S PST")
 
-    return utc_dt.astimezone(PACIFIC).strftime("%Y-%m-%d %H:%M:%S PDT")
-
-
-# ============================================================
-# SENSOR VALUE EXTRACTION FROM PAYLOAD
 # Read the data from the PAYLOAD
 #
 # All sensor data lives in the payload.
@@ -87,7 +61,7 @@ def to_pacific_str(utc_dt):
 #   Assignment8_virtual  → post sharing data for BOTH houses
 #                          filter by topic containing TOPIC_B
 #
-# Sensors Data (from actual payload inspection):
+# SENSOR KEYS (from actual payload inspection):
 #   Moisture  → 'Moisture Meter - Moisture Meter' or starts with same
 #   Dishwasher→ 'Float Switch - Float Switch'
 #   Electricity→ 'Ammeter' (main board) or 'Ammeter 3 UUID...'
@@ -95,172 +69,111 @@ def to_pacific_str(utc_dt):
 # Extract moisture value from any payload (works for both houses)
 # Handles: 'Moisture Meter - Moisture Meter', 'Moisture', 'LM386 - Sensor1'
 # and their UUID-suffixed duplicate board variants
-# ============================================================
-
-# Extract fridge moisture value from the payload.
-# Different DataNiz boards may use different sensor names.
-    
 def extract_moisture(payload):
-    
-    possible_keys = [
-        "Moisture Meter - Moisture Meter",
-        "Moisture",
-        "LM386 - Sensor1"
-    ]
-
-    for key in possible_keys:
-        if key in payload:
-            try:
-                val = float(payload[key])
-                if val > 0:
-                    return val
-            except (ValueError, TypeError):
-                pass
-
-# Check duplicate board keys or UUID-suffixed keys.
+    # Primary Akira/Zhihan shared board key
+    if 'Moisture Meter - Moisture Meter' in payload:
+        val = float(payload['Moisture Meter - Moisture Meter'])
+        return val if val > 0 else None
+    # Zhihan's original fridge key (newer data)
+    if 'Moisture' in payload:
+        val = float(payload['Moisture'])
+        return val if val > 0 else None
+    # Zhihan's early fridge key
+    if 'LM386 - Sensor1' in payload:
+        val = float(payload['LM386 - Sensor1'])
+        return val if val > 0 else None
+    # Duplicate board keys with UUID suffix — check all keys
     for key in payload:
-        if "Moisture Meter" in key or (key.startswith("Moisture") and "Ammeter" not in key):
+        if 'Moisture Meter' in key or (key.startswith('Moisture') and 'Ammeter' not in key):
             try:
                 val = float(payload[key])
-                if val > 0:
-                    return val
+                return val if val > 0 else None
             except (ValueError, TypeError):
                 continue
-
     return None
 
-# Extract dishwasher water usage value from the payload.
-# The value is treated as liters per cycle.
-    
+# Extract dishwasher water usage from payload (liters per cycle)
+# Akira uses: 'Float Switch - Float Switch'
+# Zhihan uses: 'water consumption sensor' or 'Float Switch - Float Switch'
 def extract_water(payload):
-    
-
-    possible_keys = [
-        "Float Switch - Float Switch",
-        "water consumption sensor"
-    ]
-
-    for key in possible_keys:
-        if key in payload:
-            try:
-                val = float(payload[key])
-                if val > 0:
-                    return val
-            except (ValueError, TypeError):
-                pass
-
+    if 'Float Switch - Float Switch' in payload:
+        val = float(payload['Float Switch - Float Switch'])
+        return val if val > 0 else None
+    if 'water consumption sensor' in payload:
+        val = float(payload['water consumption sensor'])
+        return val if val > 0 else None
     return None
 
-# Extract electricity-related reading from the payload.
-# For this assignment, Ammeter values are treated as electricity consumption readings.
-
+# Extract electricity reading from payload
+# Main board: 'Ammeter'
+# Duplicate board: 'Ammeter 3 UUID...' or 'Ammeter 1 UUID...'
 def extract_electricity(payload):
-    
-    if "Ammeter" in payload:
-        try:
-            val = float(payload["Ammeter"])
-            if val > 0:
-                return val
-        except (ValueError, TypeError):
-            pass
-
-    # Check duplicate board keys such as "Ammeter 3 UUID..."
+    if 'Ammeter' in payload:
+        val = float(payload['Ammeter'])
+        return val if val > 0 else None
+    # Duplicate board ammeter keys with UUID suffix
     for key in payload:
-        if key.startswith("Ammeter"):
+        if key.startswith('Ammeter'):
             try:
                 val = float(payload[key])
                 if val > 0:
                     return val
             except (ValueError, TypeError):
                 continue
-
     return None
 
 
-# ============================================================
-# LINKED LIST CLASSES
-# ============================================================
+# Use LINKED LIST
+# Required by assignment to manage retrieved sensor records
 
-# One linked list node.
-# It stores one sensor reading and the house label.
+# Single node — holds one sensor reading and its house label
 class Node:
-    
-
     def __init__(self, value, house):
-        self.value = value
-        self.house = house
-        self.next = None
+        self.value = value   # float sensor reading
+        self.house = house   # "House A" or "House B"
+        self.next  = None    # pointer to next node
 
-# Singly linked list used to store sensor records.
+# Singly linked list to store all readings from both houses
 class LinkedList:
-
     def __init__(self):
         self.head = None
         self.size = 0
 
-    # Add one reading to the end of the linked list.
+    # Add a new reading to the end of the list
     def append(self, value, house):
-        
         new_node = Node(value, house)
-
-        if self.head is None:
+        if not self.head:
             self.head = new_node
         else:
-            current = self.head
-
-            while current.next is not None:
-                current = current.next
-
-            current.next = new_node
-
+            cur = self.head
+            while cur.next:
+                cur = cur.next
+            cur.next = new_node
         self.size += 1
-    
-    # Convert linked list data to a normal Python list.
+
+    # Return all (value, house) pairs as a plain Python list
     def get_all(self):
-        
         result = []
-        current = self.head
-
-        while current is not None:
-            result.append((current.value, current.house))
-            current = current.next
-
+        cur = self.head
+        while cur:
+            result.append((cur.value, cur.house))
+            cur = cur.next
         return result
 
-    # Add all values from another linked list.
-    def merge(self, other_list):
-        
-        for value, house in other_list.get_all():
-            self.append(value, house)
-
-    # Return total readings and counts for each house.
-    # Used by the electricity query.
+    # Return total values and counts per house (used for electricity)
     def sum_by_house(self):
-        
-        totals = {
-            "House A": 0.0,
-            "House B": 0.0
-        }
-
-        counts = {
-            "House A": 0,
-            "House B": 0
-        }
-
-        current = self.head
-
-        while current is not None:
-            if current.house in totals:
-                totals[current.house] += current.value
-                counts[current.house] += 1
-
-            current = current.next
-
+        totals = {"House A": 0.0, "House B": 0.0}
+        counts = {"House A": 0,   "House B": 0}
+        cur = self.head
+        while cur:
+            if cur.house in totals:
+                totals[cur.house] += cur.value
+                counts[cur.house] += 1
+            cur = cur.next
         return totals, counts
 
 
-# ============================================================
-# DATA FETCHING FUNCTIONS
+# DATA FETCHERS
 # Data layout:
 #   - House A data: query table_virtual  +  table_ass8_virtual
 #   - House B data: query Table1_virtual + Assignment8_virtual (topic=zhihan)
@@ -269,427 +182,305 @@ class LinkedList:
 # This uses DataNiz metadata to identify which house owns each reading
 # TOPIC_A = akira.doi01@student.csulb.edu → House A
 # TOPIC_B = zhihanyao121@gmail.com        → House B
-# ============================================================
-
-# Determine whether a payload belongs to House A or House B.
-# DataNiz shared tables can contain data from both houses, so the topic is important.
 def get_house_from_topic(payload):
-
     topic = payload.get("topic", "")
-
     if TOPIC_A in topic:
         return "House A"
-
-    if TOPIC_B in topic:
+    elif TOPIC_B in topic:
         return "House B"
+    return None  # unknown topic — skip this record
 
-    return None
-
-# Fetch data from Akira's original table_virtual.
+# Fetch all data from Akira's table_virtual
+# House is determined by topic — could contain either house's data
 def fetch_table_virtual(start_dt, end_dt, extractor):
-    
     ll = LinkedList()
-
     try:
         conn = get_conn("A")
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT payload
-            FROM "table_virtual"
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT payload FROM "table_virtual"
             WHERE time >= %s AND time <= %s
             ORDER BY time ASC
-            """,
-            (start_dt, end_dt)
-        )
-
+        """, (start_dt, end_dt))
         rows = cur.fetchall()
-        cur.close()
         conn.close()
-
         for row in rows:
-            payload = row[0]
-            house = get_house_from_topic(payload)
-
+            # Determine house from topic metadata (DataNiz device ownership)
+            house = get_house_from_topic(row[0])
             if house is None:
-                continue
-
-            val = extractor(payload)
-
+                continue  # skip unknown topics
+            val = extractor(row[0])
             if val is not None:
                 ll.append(val, house)
-
         print(f"[Server] table_virtual: {ll.size} readings")
-
     except Exception as e:
         print(f"[Server] table_virtual fetch error: {e}")
-
     return ll
 
-
-# Fetch post-sharing data from Akira's table_ass8_virtual.
-# This table can include both houses' shared data.
-
+# Fetch post-sharing data from Akira's table_ass8_virtual
+# Contains both Akira's and Zhihan's shared devices
+# House is determined by topic — NOT by which DB we query
 def fetch_table_ass8(start_dt, end_dt, extractor):
-    
-
     ll = LinkedList()
-
     try:
         conn = get_conn("A")
-        cur = conn.cursor()
-
+        cur  = conn.cursor()
         post_start = max(start_dt, SHARING_START)
-
-        cur.execute(
-            """
-            SELECT payload
-            FROM "table_ass8_virtual"
+        cur.execute("""
+            SELECT payload FROM "table_ass8_virtual"
             WHERE time >= %s AND time <= %s
             ORDER BY time ASC
-            """,
-            (post_start, end_dt)
-        )
-
+        """, (post_start, end_dt))
         rows = cur.fetchall()
-        cur.close()
         conn.close()
-
         for row in rows:
-            payload = row[0]
-            house = get_house_from_topic(payload)
-
+            # Determine house from topic metadata (DataNiz device ownership)
+            house = get_house_from_topic(row[0])
             if house is None:
-                continue
-
-            val = extractor(payload)
-
+                continue  # skip unknown topics
+            val = extractor(row[0])
             if val is not None:
                 ll.append(val, house)
-
         print(f"[Server] table_ass8_virtual: {ll.size} readings")
-
     except Exception as e:
         print(f"[Server] table_ass8_virtual fetch error: {e}")
-
     return ll
 
-# Fetch Zhihan's pre-sharing data from House B's database.
-# This is only needed when the query window starts before DataNiz sharing began. 
-def fetch_house_b_pre_sharing(start_dt, extractor):
-
+# Fetch House B pre-sharing data from Zhihan's Table1_virtual
+# Only called when query window starts before SHARING_START
+# Requires direct connection to House B's NeonDB
+def fetch_b_pre(start_dt, extractor):
     ll = LinkedList()
-
     try:
         conn = get_conn("B")
-        cur = conn.cursor()
-
-        cur.execute(
-            """
-            SELECT payload
-            FROM "Table1_virtual"
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT payload FROM "Table1_virtual"
             WHERE time >= %s AND time < %s
             ORDER BY time ASC
-            """,
-            (start_dt, SHARING_START)
-        )
-
+        """, (start_dt, SHARING_START))
         rows = cur.fetchall()
-        cur.close()
         conn.close()
-
         for row in rows:
-            payload = row[0]
-            house = get_house_from_topic(payload)
-
-            # If topic is missing, this table still belongs to House B.
+            # Determine house from topic metadata
+            house = get_house_from_topic(row[0])
             if house is None:
-                house = "House B"
-
-            val = extractor(payload)
-
+                house = "House B"  # Table1_virtual is Zhihan's own table
+            val = extractor(row[0])
             if val is not None:
                 ll.append(val, house)
-
-        print(f"[Server] House B pre-sharing Table1_virtual: {ll.size} readings")
-
+        print(f"[Server] House B pre-sharing (Table1_virtual): {ll.size} readings")
     except Exception as e:
-        print(f"[Server] House B pre-sharing fetch error: {e}")
-
+        print(f"[Server] House B pre-sharing error: {e}")
     return ll
 
-# Main distributed fetch function.
-# 1. House A original data
-# 2. House A shared table data
-# 3. House B pre-sharing data, if needed
-    
+# Main distributed fetch — combines all four data sources
+# Implements the query completeness check for the assignment
 def fetch_distributed(start_dt, end_dt, extractor):
-
-    print("-" * 60)
-    print(f"[Server] Fetch range: {to_pacific_str(start_dt)} to {to_pacific_str(end_dt)}")
-
+    # Fetch from Akira's table_virtual (house determined by topic)
     ll_main = fetch_table_virtual(start_dt, end_dt, extractor)
-    ll_shared = fetch_table_ass8(start_dt, end_dt, extractor)
+    # Fetch from Akira's table_ass8_virtual (post-sharing, house by topic)
+    ll_ass8 = fetch_table_ass8(start_dt, end_dt, extractor)
 
+    # Completeness check: if query window predates sharing,
+    # fetch House B pre-sharing data directly from Zhihan's DB
     if start_dt < SHARING_START:
-        print("[Server] Query includes pre-sharing period. Fetching House B original data...")
-        ll_b_pre = fetch_house_b_pre_sharing(start_dt, extractor)
+        print(f"[Server] Query includes pre-sharing period — fetching from peer DB...")
+        ll_b_pre = fetch_b_pre(start_dt, extractor)
     else:
-        print("[Server] Query is fully after sharing start. Local shared data is enough.")
+        print(f"[Server] Query fully covered by local data (after sharing started)")
         ll_b_pre = LinkedList()
 
+    # Merge all three linked lists into one
     merged = LinkedList()
-    merged.merge(ll_main)
-    merged.merge(ll_shared)
-    merged.merge(ll_b_pre)
-
+    for val, house in ll_main.get_all():
+        merged.append(val, house)
+    for val, house in ll_ass8.get_all():
+        merged.append(val, house)
+    for val, house in ll_b_pre.get_all():
+        merged.append(val, house)
     print(f"[Server] Total records merged: {merged.size}")
-
     return merged
 
 
-# ============================================================
-# QUERY HANDLERS
-# ============================================================
-
-# Query 1:
-# Average fridge moisture for past hour, past week, and past month.
+# QUERY HANDLERS:
+# Query 1: Average fridge moisture for past hour, week, month
+# Sensor: 'Moisture Meter - Moisture Meter' (both houses)
+# Output unit: % RH (no imperial conversion needed)
 def query_fridge_moisture():
-    
     now = datetime.now(timezone.utc)
-
     periods = {
-        "Past Hour": now - timedelta(hours=1),
-        "Past Week": now - timedelta(weeks=1),
-        "Past Month": now - timedelta(days=30)
+        "Past Hour":  now - timedelta(hours=1),
+        "Past Week":  now - timedelta(weeks=1),
+        "Past Month": now - timedelta(days=30),
     }
 
-    lines = [
-        "=" * 60,
-        "Query 1: Average Kitchen Fridge Moisture",
-        "House A = Akira, House B = Zhihan",
-        "=" * 60
-    ]
+    lines = ["=" * 60,
+             "  Query 1: Average Kitchen Fridge Moisture",
+             "  Both Houses Combined",
+             "=" * 60]
 
     for label, start_dt in periods.items():
-        ll = fetch_distributed(start_dt, now, extract_moisture)
+        ll   = fetch_distributed(start_dt, now, extract_moisture)
         data = ll.get_all()
 
         if not data:
-            lines.append(f"\n{label}:")
-            lines.append("  No moisture data available.")
+            lines.append(f"  {label}: No data available")
             continue
 
-        all_vals = [value for value, house in data]
-        house_a_vals = [value for value, house in data if house == "House A"]
-        house_b_vals = [value for value, house in data if house == "House B"]
+        # Compute combined average and per-house breakdown
+        all_vals     = [v for v, h in data]
+        house_a_vals = [v for v, h in data if h == "House A"]
+        house_b_vals = [v for v, h in data if h == "House B"]
 
-        combined_avg = sum(all_vals) / len(all_vals)
-        house_a_avg = sum(house_a_vals) / len(house_a_vals) if house_a_vals else 0
-        house_b_avg = sum(house_b_vals) / len(house_b_vals) if house_b_vals else 0
+        avg   = sum(all_vals)     / len(all_vals)
+        avg_a = sum(house_a_vals) / len(house_a_vals) if house_a_vals else 0
+        avg_b = sum(house_b_vals) / len(house_b_vals) if house_b_vals else 0
 
-        lines.append(f"\n{label}:")
-        lines.append(f"  Combined avg : {combined_avg:.2f}% RH  (n={len(all_vals)})")
-        lines.append(f"  House A avg  : {house_a_avg:.2f}% RH  (n={len(house_a_vals)})")
-        lines.append(f"  House B avg  : {house_b_avg:.2f}% RH  (n={len(house_b_vals)})")
+        lines.append(f"\n  {label}:")
+        lines.append(f"    Combined avg : {avg:.2f}% RH  (n={len(all_vals)})")
+        lines.append(f"    House A avg  : {avg_a:.2f}% RH  (n={len(house_a_vals)})")
+        lines.append(f"    House B avg  : {avg_b:.2f}% RH  (n={len(house_b_vals)})")
 
-    lines.append(f"\nQueried at: {to_pacific_str(now)}")
-
+    lines.append(f"\n  Queried at: {to_pst_str(now)}")
     return "\n".join(lines)
 
-# Query 2:
-# Average dishwasher water consumption per cycle for past hour, week, and month.
-# Values are read as liters and also displayed in gallons.
+# Query 2: Average dishwasher water per cycle for past hour, week, month
+# Sensor: 'Float Switch - Float Switch' (liters)
+# Output unit: gallons (imperial) — converted via x 0.264172
 def query_dishwasher_water():
-    
     now = datetime.now(timezone.utc)
-
     periods = {
-        "Past Hour": now - timedelta(hours=1),
-        "Past Week": now - timedelta(weeks=1),
-        "Past Month": now - timedelta(days=30)
+        "Past Hour":  now - timedelta(hours=1),
+        "Past Week":  now - timedelta(weeks=1),
+        "Past Month": now - timedelta(days=30),
     }
 
-    lines = [
-        "=" * 60,
-        "Query 2: Average Dishwasher Water Consumption Per Cycle",
-        "House A = Akira, House B = Zhihan",
-        "=" * 60
-    ]
+    lines = ["=" * 60,
+             "  Query 2: Average Dishwasher Water Per Cycle",
+             "  Both Houses Combined",
+             "=" * 60]
 
     for label, start_dt in periods.items():
-        ll = fetch_distributed(start_dt, now, extract_water)
+        ll   = fetch_distributed(start_dt, now, extract_water)
         data = ll.get_all()
 
         if not data:
-            lines.append(f"\n{label}:")
-            lines.append("  No dishwasher water data available.")
+            lines.append(f"  {label}: No data available")
             continue
 
-        all_vals = [value for value, house in data]
-        house_a_vals = [value for value, house in data if house == "House A"]
-        house_b_vals = [value for value, house in data if house == "House B"]
+        # Compute averages in liters then convert to gallons for output
+        all_vals     = [v for v, h in data]
+        house_a_vals = [v for v, h in data if h == "House A"]
+        house_b_vals = [v for v, h in data if h == "House B"]
 
-        combined_liters = sum(all_vals) / len(all_vals)
-        house_a_liters = sum(house_a_vals) / len(house_a_vals) if house_a_vals else 0
-        house_b_liters = sum(house_b_vals) / len(house_b_vals) if house_b_vals else 0
+        avg_l = sum(all_vals)     / len(all_vals)
+        a_l   = sum(house_a_vals) / len(house_a_vals) if house_a_vals else 0
+        b_l   = sum(house_b_vals) / len(house_b_vals) if house_b_vals else 0
 
-        lines.append(f"\n{label}:")
-        lines.append(
-            f"  Combined avg : {combined_liters * LITERS_TO_GALLONS:.2f} gal/cycle "
-            f"({combined_liters:.2f} L, n={len(all_vals)})"
-        )
-        lines.append(
-            f"  House A avg  : {house_a_liters * LITERS_TO_GALLONS:.2f} gal/cycle "
-            f"({house_a_liters:.2f} L, n={len(house_a_vals)})"
-        )
-        lines.append(
-            f"  House B avg  : {house_b_liters * LITERS_TO_GALLONS:.2f} gal/cycle "
-            f"({house_b_liters:.2f} L, n={len(house_b_vals)})"
-        )
+        lines.append(f"\n  {label}:")
+        lines.append(f"    Combined avg : {avg_l * LITERS_TO_GALLONS:.2f} gal/cycle  ({avg_l:.2f} L, n={len(all_vals)})")
+        lines.append(f"    House A avg  : {a_l * LITERS_TO_GALLONS:.2f} gal/cycle  (n={len(house_a_vals)})")
+        lines.append(f"    House B avg  : {b_l * LITERS_TO_GALLONS:.2f} gal/cycle  (n={len(house_b_vals)})")
 
-    lines.append(f"\nQueried at: {to_pacific_str(now)}")
-
+    lines.append(f"\n  Queried at: {to_pst_str(now)}")
     return "\n".join(lines)
 
-# Query 3:
-# Compare electricity-related readings between both houses in the past 24 hours.
-# For this assignment, Ammeter readings are treated as electricity consumption values.
-def query_electricity():
 
-    now = datetime.now(timezone.utc)
+# Query 3: Which house consumed more electricity in past 24 hours?
+# Sensor: 'Ammeter' on main board (both houses)
+# Output: kWh totals per house, winner, and difference
+def query_electricity():
+    now      = datetime.now(timezone.utc)
     start_dt = now - timedelta(hours=24)
 
-    ll = fetch_distributed(start_dt, now, extract_electricity)
+    ll             = fetch_distributed(start_dt, now, extract_electricity)
     totals, counts = ll.sum_by_house()
 
-    house_a_total = totals["House A"]
-    house_b_total = totals["House B"]
-    difference = abs(house_a_total - house_b_total)
+    a_kwh  = totals["House A"]
+    b_kwh  = totals["House B"]
+    diff   = abs(a_kwh - b_kwh)
 
-    if house_a_total > house_b_total:
-        result_line = "House A (Akira) consumed MORE electricity."
-        compare_line = f"House A consumed {difference:.2f} kWh more than House B."
-    elif house_b_total > house_a_total:
-        result_line = "House B (Zhihan) consumed MORE electricity."
-        compare_line = f"House B consumed {difference:.2f} kWh more than House A."
-    else:
-        result_line = "Both houses consumed the same amount of electricity."
-        compare_line = "Difference: 0.00 kWh."
+    # Determine which house used more electricity
+    winner = "House A (Akira)"  if a_kwh >= b_kwh else "House B (Zhihan)"
+    loser  = "House B (Zhihan)" if a_kwh >= b_kwh else "House A (Akira)"
 
     lines = [
         "=" * 60,
-        "Query 3: Electricity Consumption in the Past 24 Hours",
-        "House A = Akira, House B = Zhihan",
+        "  Query 3: Electricity Consumption — Past 24 Hours",
         "=" * 60,
-        f"House A total: {house_a_total:.2f} kWh  (n={counts['House A']})",
-        f"House B total: {house_b_total:.2f} kWh  (n={counts['House B']})",
-        "",
-        f"Result: {result_line}",
-        compare_line,
-        f"\nQueried at: {to_pacific_str(now)}"
+        f"  House A (Akira) : {a_kwh:.2f} kWh  ({counts['House A']} readings)",
+        f"  House B (Zhihan): {b_kwh:.2f} kWh  ({counts['House B']} readings)",
+        f"",
+        f"  --> {winner} consumed MORE electricity",
+        f"      by {diff:.2f} kWh compared to {loser}",
+        f"\n  Queried at: {to_pst_str(now)}",
     ]
-
     return "\n".join(lines)
 
 
-# ============================================================
-# QUERY ROUTER
-# ============================================================
-
-# Choose which query function to run based on the client's message.
+# QUERY ROUTER:
+# The process is guided by the query provided by the client side.
 def route_query(message):
-
     msg = message.strip().lower()
-
-    print(f"[Server] Routing message: {msg}")
-
+    print(f"[Server] Routing: '{msg[:60]}...'")
     if "moisture" in msg and "fridge" in msg:
         return query_fridge_moisture()
-
-    if "water consumption" in msg and "dishwasher" in msg:
+    elif "water consumption" in msg and "dishwasher" in msg:
         return query_dishwasher_water()
-
-    if "electricity" in msg and "24 hours" in msg:
+    elif "electricity" in msg and "24 hours" in msg:
         return query_electricity()
+    else:
+        print(f"[Server] No match found")
+        return "ERROR: Unrecognized query."
 
-    return "ERROR: Unrecognized query."
-
-
-# ============================================================
-# TCP SERVER
-# ============================================================
 
 # TCP server: Configure necessary server-side processing.
-# Ask user which port to listen on.
-# If user just presses Enter, use SERVER_PORT from .env.
 def server():
-    port_input = input(f"Enter port number to listen [{SERVER_PORT}]: ").strip()
-
-    if port_input == "":
-        port = SERVER_PORT
-    else:
-        port = int(port_input)
+    # Ask user which port to listen on
+    port = int(input("Enter port number to listen: "))
 
     # Create TCP socket — AF_INET = IPv4, SOCK_STREAM = TCP
     TCPSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    # Allow the port to be reused after restarting the server.
-    # This helps avoid: OSError: [Errno 48] Address already in use
-    TCPSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    # Bind to all interfaces on this machine
+    TCPSocket.bind(("", port))
 
-    try:
-        # Bind to all interfaces on this machine
-        TCPSocket.bind(("", port))
+    # Allow up to 5 queued connections
+    TCPSocket.listen(5)
 
-        # Allow up to 5 queued connections
-        TCPSocket.listen(5)
+    print(f"[Server] Listening on port {port}...")
+    print(f"[Server] Sharing started at: {to_pst_str(SHARING_START)}")
 
-        print("=" * 60)
-        print("CECS 327 Assignment 8 TCP Server")
-        print("=" * 60)
-        print(f"[Server] Listening on port {port}...")
-        print(f"[Server] Sharing started at: {to_pacific_str(SHARING_START)}")
-        print("=" * 60)
+    # Block until a client connects
+    incomingSocket, incomingAddress = TCPSocket.accept()
+    print(f"[Server] Connected by: {incomingAddress}")
 
-        # Keep server running so it can accept more than one client
-        while True:
-            # Block until a client connects
-            incomingSocket, incomingAddress = TCPSocket.accept()
-            print(f"[Server] Connected by: {incomingAddress}")
+    while True:
+        # Receive query — 4096 bytes handles long query strings
+        data = incomingSocket.recv(4096)
+        if not data:
+            break
 
-            with incomingSocket:
-                while True:
-                    # Receive query — 4096 bytes handles long query strings
-                    data = incomingSocket.recv(4096)
+        message = data.decode("utf-8")
+        print(f"\n[Server] Received: {message}")
 
-                    if not data:
-                        print("[Server] Client disconnected.")
-                        break
+        # Exit signal from client
+        if message.strip().lower() == "exit":
+            print("[Server] Client disconnected.")
+            break
 
-                    message = data.decode("utf-8").strip()
-                    print(f"\n[Server] Received: {message}")
+        # Route query to handler and send result back
+        response = route_query(message)
+        print(f"[Server] Sending response...")
+        incomingSocket.send(response.encode("utf-8"))
 
-                    # Exit signal from client
-                    if message.lower() == "exit":
-                        print("[Server] Client requested exit.")
-                        break
+    # Close both sockets when done
+    incomingSocket.close()
+    TCPSocket.close()
+    print("[Server] Closed.")
 
-                    # Route query to handler and send result back
-                    response = route_query(message)
-                    print("[Server] Sending response...")
-                    incomingSocket.sendall(response.encode("utf-8"))
 
-    except KeyboardInterrupt:
-        print("\n[Server] Stopped by user.")
-
-    except Exception as e:
-        print(f"[Server] Error: {e}")
-
-    finally:
-        TCPSocket.close()
-        print("[Server] Closed.")
-
+# Run server when executed directly
 if __name__ == "__main__":
     server()
