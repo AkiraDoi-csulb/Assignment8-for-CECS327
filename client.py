@@ -6,13 +6,14 @@
 import socket
 import ipaddress
 
+# Prepare the queries
 queries = {
     "1": "What is the average moisture inside our kitchen fridges in the past hours, week and month?",
     "2": "What is the average water consumption per cycle across our smart dishwashers in the past hour, week and month?",
     "3": "Which house consumed more electricity in the past 24 hours, and by how much?",
 }
 
-
+# Set the menu
 def user_menu():
     print("-" * 100)
     print("IoT houses data menu:")
@@ -62,6 +63,7 @@ def client():
 
         query_text = None
 
+        # Check if the num or text in the queries
         if message in queries:
             query_text = queries[message]
         else:
@@ -69,7 +71,7 @@ def client():
                 if message.lower() == value.lower():
                     query_text = value
                     break
-
+        # Set the message for any other input
         if query_text is None:
             print("Sorry, this query cannot be processed. Please try one of the supported queries.")
             continue
